@@ -1,5 +1,42 @@
-# Игнорировать виртуальные окружения Python
-venv/
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Python and build environments
+.build-env/
 .venv/
-ENV/
+venv/
 env/
+
+# PyInstaller output
+build/
+dist/
+*.spec
+
+# Downloaded third-party tools and generated release archives
+/tools/
+*.exe
+*.zip
+*.7z
+
+# User downloads and temporary files
+/Downloads/
+*.part
+*.ytdl
+*.tmp
+*.log
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local secrets
+.env
+.env.*
+!.env.example
