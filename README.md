@@ -4,7 +4,10 @@ A simple, portable video downloader for **Windows 10/11 x64**, built with Python
 
 **Paste a link → check the video → choose an available quality → download.**
 
-The application currently has a **Russian-language interface**. This README is in English.
+The interface supports **English and Russian**. On first launch, a Russian Windows
+UI language selects Russian; every other system language selects English.
+Use the language selector in the header to switch at any time. Your choice is
+saved and takes priority over system detection on later launches.
 
 ## Download and run
 
@@ -13,8 +16,12 @@ The application currently has a **Russian-language interface**. This README is i
 3. Save it in a writable folder and double-click it.
 
 **No Python, FFmpeg, yt-dlp or Deno installation is required to run the packaged EXE.**
-All required components are included. Startup may take a few seconds while they
-are extracted to a temporary folder.
+All required components are included. **The first launch of each version** extracts
+them to `%LOCALAPPDATA%\DLPapp\runtime`. Subsequent launches reuse this cache
+instead of decompressing hundreds of megabytes again. The runtime is not deleted
+when the application closes. Updates use a separate cache identified by the
+embedded archive's SHA-256 hash. Removing the cache causes the next launch to
+prepare it again. Windows Defender scanning and disk speed can still affect startup.
 
 You can move the **single EXE** between folders, drives or USB storage after
 closing the application. Downloads are saved in a `Downloads` folder beside the
@@ -39,10 +46,10 @@ for a later retry with the same quality.
 ## Usage
 
 1. Paste a full `http://` or `https://` link to an individual video.
-2. Click **Проверить видео** (Check video).
+2. Click **Check video** (or **Проверить видео** in Russian).
 3. Select an available resolution.
-4. Click **Скачать видео** (Download video).
-5. Wait for **Готово** (Done), then open the `Downloads` folder.
+4. Click **Download video** (or **Скачать видео** in Russian).
+5. Wait for **Done** (or **Готово**), then open the `Downloads` folder.
 
 Progress may reach 100% before video and audio have finished merging. Wait for
 the completion message before opening or moving the output file.
@@ -65,8 +72,12 @@ The build script:
 1. Creates an isolated `.build-env` environment and installs PyInstaller.
 2. Runs the tests.
 3. Downloads missing Windows tools into `tools` and checks that they run.
-4. Bundles Python, the GUI, logo assets and tools into one executable.
-5. Checks the output file and prints its location.
+4. Builds a PyInstaller directory containing the GUI, Python, assets and tools.
+5. Compresses that directory and attaches it to the small Windows cache launcher,
+   producing the final single EXE and checking its file header.
+
+The launcher is provided in `launcher_blob.py`; **a C compiler is not required**
+for normal builds. Its readable source is included in `native/launcher.c`.
 
 The result is:
 
@@ -75,8 +86,10 @@ dist/DLPapp.exe
 ```
 
 Distribute **only this EXE**. The `.build-env`, `build` and `tools` folders are
-not needed separately on the user's computer. Temporary bundled components
-are normally removed on exit; downloaded videos remain beside the EXE.
+not needed separately on the user's computer. The final EXE extracts its bundled
+components once per version and keeps them in the user's runtime cache. Downloaded
+videos remain beside the EXE; language settings are saved separately in
+`%LOCALAPPDATA%\DLPapp\settings.json`.
 
 To update the bundled tools and rebuild:
 
@@ -104,6 +117,10 @@ for building the executable and is installed automatically by the build script.
 | File or folder | Purpose |
 | --- | --- |
 | `app.py` | Tkinter window, UI state, background workers, processes, progress and cancellation. |
+| `i18n.py` | English/Russian strings, Windows language detection and saved language preferences. |
+| `package_exe.py` | Adds a compressed runtime and cache manifest to the launcher. |
+| `launcher_blob.py` | Precompiled Windows x64 cache launcher, embedded as base64 for the build script. |
+| `native/` | Readable C launcher source, manifest and optional MinGW rebuild script. |
 | `core.py` | URL validation, portable paths, available resolutions, yt-dlp commands and progress parsing. |
 | `setup_tools.py` | Downloads upstream Windows tools, verifies SHA-256 when a digest is provided by the GitHub API, extracts binaries and records tool versions. |
 | `build_exe.py` | Prepares the build environment, runs tests and creates a portable EXE. |
@@ -137,13 +154,32 @@ and the output file is found.
 
 ### Portability
 
-In a PyInstaller build, `core.app_dir()` uses `sys.executable` to locate the
-EXE's folder, while `sys._MEIPASS` identifies the extracted bundled components.
-This keeps permanent downloads separate from temporary runtime files.
+`core.app_dir()` uses the original EXE directory passed by the launcher. Direct
+Python/PyInstaller launches retain their normal fallback paths. `sys._MEIPASS`
+locates packaged assets and tools in the runtime. Settings and runtime files are
+kept under the Windows user profile; downloads remain beside the EXE.
 
-The separately supplied initial EXE uses a 7-Zip SFX package with portable
-Python. `build_exe.py` builds subsequent EXEs with PyInstaller. Both packages
-include the required runtime and tools in one file.
+### Runtime caching
+
+The native launcher reads the embedded archive's version hash and checks the cache
+marker and required files. When the cache is missing or incomplete, it verifies the
+archive's SHA-256 and extracts it using Windows PowerShell and .NET ZIP support.
+A per-user named mutex prevents simultaneous first launches from extracting the
+same version twice. The readiness marker is written only after extraction succeeds.
+
+For ordinary launches the cached application is started directly. `DLPAPP_HOME`
+passes the folder of the original EXE to the application, so moving the EXE does
+not move downloads into the cache. A PyInstaller directory is used for source builds;
+the provided release uses the same launcher with a portable Python runtime.
+
+The launcher source can optionally be rebuilt with MinGW-w64:
+
+```powershell
+python native/build_launcher.py
+```
+
+This updates `launcher_blob.py`. MinGW is needed only for modifying the native
+launcher, not for `python build_exe.py`.
 
 ## Tests
 
@@ -154,9 +190,9 @@ python -m unittest discover -s tests -v
 ```
 
 The tests use local data and subprocesses; they do not contact YouTube.
-Eleven tests passed in the development environment. Python syntax, GUI window
-creation on Linux and the supplied EXE archive's integrity were also checked.
-**The supplied EXE has not yet been run on native Windows, and the Windows
+Fifteen tests passed in the development environment. Python syntax and EN/RU switching in a Linux GUI window were checked. The Windows
+launcher compiled without warnings, and the release archive was checked for integrity.
+**The updated cached EXE has not yet been run on native Windows, and the Windows
 PyInstaller build has not yet been executed in the development environment.**
 These checks do not establish that real downloads work on every supported site.
 

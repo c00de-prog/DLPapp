@@ -3,9 +3,12 @@ import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+from i18n import AppError
 
 
 def app_dir():
+    if os.environ.get('DLPAPP_HOME') and (getattr(sys, 'frozen', False) or hasattr(sys, 'dlpapp_home')):
+        return Path(os.environ['DLPAPP_HOME']).resolve()
     if hasattr(sys, 'dlpapp_home'):
         return Path(sys.dlpapp_home).resolve()
     return Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
@@ -15,21 +18,21 @@ def validate_url(value):
     value = value.strip()
     parsed = urlsplit(value)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
-        raise ValueError('Введите полную ссылку http:// или https:// на одно видео.')
+        raise AppError('invalid_url')
     return value
 
 
 def qualities(info):
     if info.get('_type') in ('playlist', 'multi_video') or info.get('entries') is not None:
-        raise ValueError('Вставьте ссылку на отдельное видео, а не на плейлист.')
+        raise AppError('playlist')
     if info.get('is_live'):
-        raise ValueError('Прямые эфиры пока не поддерживаются. Дождитесь окончания трансляции.')
+        raise AppError('live')
     heights = set()
     for item in info.get('formats', []):
         if item.get('vcodec') not in (None, 'none') and isinstance(item.get('height'), (int, float)):
             heights.add(int(item['height']))
     if not heights:
-        raise ValueError('Не удалось найти доступные видеоформаты.')
+        raise AppError('no_formats')
     return sorted(heights, reverse=True)
 
 
@@ -41,7 +44,7 @@ def base_command(root):
         tools = root / 'tools'
     for name in ('yt-dlp', 'ffmpeg', 'ffprobe', 'deno'):
         if not (tools / (name + suffix)).is_file():
-            raise ValueError('Нет tools/' + name + suffix + '. Запустите build_exe.py или setup_tools.py.')
+            raise AppError('missing_tool', name='tools/' + name + suffix)
     return [str(tools / ('yt-dlp' + suffix)), '--ignore-config', '--no-playlist', '--no-colors',
             '--encoding', 'utf-8', '--socket-timeout', '20', '--retries', '3', '--extractor-retries', '2',
             '--ffmpeg-location', str(tools), '--js-runtimes', 'deno:' + str(tools / ('deno' + suffix))]
@@ -54,7 +57,7 @@ def probe_command(root, url):
 def download_command(root, url, height, folder):
     height = int(height)
     if height <= 0:
-        raise ValueError('Выберите качество.')
+        raise AppError('select_quality')
     # Exact height: never silently substitute a lower quality.
     selector = f'bv[height={height}]+ba/b[height={height}]/bv[height={height}]'
     return base_command(root) + ['--newline', '--progress', '--progress-delta', '0.3',

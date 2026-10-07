@@ -23,12 +23,13 @@ Keep licenses with redistributed binaries and provide corresponding source
 for GPL components as required by their licenses. This project does not claim
 ownership of upstream binaries. The source ZIP contains no third-party binaries.
 
-The provided single-file SFX release additionally includes:
-- Official Python 3.12.10 x64 runtime and Tcl/Tk, extracted from
-  https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
-  Python LICENSE.txt is included at the runtime root. Tcl/Tk license.terms files
-  are retained in their original Tcl directories.
-- Official 7-Zip LZMA SDK 23.01 7zSD.sfx self-extractor:
-  https://www.7-zip.org/a/lzma2301.7z
-  SDK license/source: https://www.7-zip.org/sdk.html
-  SDK license text is included in licenses/7zip-lzma.txt.
+The supplied cached-runtime release additionally includes the official Python
+3.12.10 x64 runtime and Tcl/Tk, extracted from:
+https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+Python LICENSE.txt is retained at the runtime root. Tcl/Tk license.terms files
+are retained in their original Tcl directories.
+
+The cache launcher is compiled from native/launcher.c with MinGW-w64. It uses
+Windows system APIs and the Windows-provided PowerShell/.NET ZIP extractor;
+it does not bundle a 7-Zip SFX module. launcher_blob.py contains the precompiled
+launcher, and native/build_launcher.py can regenerate it.

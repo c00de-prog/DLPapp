@@ -40,7 +40,7 @@ class WorkerTests(unittest.TestCase):
     def test_failed_probe_and_missing_file(self):
         events = self.worker('import sys; print("ERROR: unavailable"); sys.exit(1)')
         self.assertEqual(events[-1][0], 'error')
-        self.assertIn('unavailable', events[-1][1])
+        self.assertIn('unavailable', str(events[-1][1]))
         self.assertEqual(self.worker('print("FILE:/missing/video")', 'download')[-1][0], 'error')
 
     def test_cancel_before_start(self):

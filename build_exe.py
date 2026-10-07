@@ -5,6 +5,10 @@ import struct
 import subprocess
 import sys
 import venv
+import zipfile
+import base64
+from package_exe import package
+from launcher_blob import LAUNCHER_B64
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -43,8 +47,8 @@ def main():
         subprocess.run([str(ROOT / 'tools' / name), flag], check=True,
                        capture_output=True, timeout=30)
     print('[4/5] Building one EXE...', flush=True)
-    command = [python, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile',
-               '--windowed', '--name', APP_NAME, '--noupx',
+    command = [python, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
+               '--windowed', '--name', 'DLPappRuntime', '--noupx',
                '--icon', str(ROOT / 'assets' / 'icon.ico'),
                '--add-data', f'{ROOT / "assets"};assets',
                '--add-data', f'{ROOT / "tools"};tools',
@@ -55,13 +59,23 @@ def main():
         if (ROOT / filename).is_file():
             command += ['--add-data', f'{ROOT / filename};.']
     run(command + [ROOT / 'app.py'])
-    output = ROOT / 'dist' / f'{APP_NAME}.exe'
+    distribution = ROOT / 'dist'
+    archive = ROOT / 'build' / 'runtime.zip'
+    runtime = distribution / 'DLPappRuntime'
+    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as stream:
+        for path in sorted(runtime.rglob('*')):
+            if path.is_file():
+                stream.write(path, path.relative_to(distribution))
+    launcher = ROOT / 'build' / 'launcher.exe'
+    launcher.write_bytes(base64.b64decode(LAUNCHER_B64))
+    output = distribution / f'{APP_NAME}.exe'
+    package(launcher, archive, output, mode=2)
     with output.open('rb') as stream:
         if stream.read(2) != b'MZ':
             raise RuntimeError('The output is not a Windows executable.')
     print('[5/5] Ready:', output, flush=True)
     print('Give users this ONE EXE. Python and tools are included.')
-    print('Downloads are stored beside the EXE. Move it after closing the app.')
+    print('Runtime is cached once per version. Downloads stay beside the EXE.')
 
 
 if __name__ == '__main__':

@@ -9,6 +9,7 @@ import tkinter as tk
 from collections import deque
 from pathlib import Path
 from tkinter import ttk, messagebox
+from i18n import AppError, load_language, save_language, translate
 from core import app_dir, validate_url, qualities, probe_command, download_command, progress
 
 BG, CARD, FG, MUTED, GREEN = '#0c111b', '#151d2c', '#eef3fb', '#a3afc2', '#44dcaa'
@@ -17,7 +18,10 @@ BG, CARD, FG, MUTED, GREEN = '#0c111b', '#151d2c', '#eef3fb', '#a3afc2', '#44dca
 class DLPapp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('DLPapp • Video downloader')
+        self.language = load_language()
+        self.text_widgets = []
+        self._status_key, self._status_values = 'idle', {}
+        self.title(self.t('window'))
         self.geometry('650x620')
         self.minsize(570, 600)
         self.configure(bg=BG)
@@ -32,9 +36,9 @@ class DLPapp(tk.Tk):
         self.heights = []
         self.url = tk.StringVar()
         self.quality = tk.StringVar()
-        self.status = tk.StringVar(value='Вставьте ссылку, чтобы начать.')
-        self.title_text = tk.StringVar(value='Видео ещё не выбрано')
-        self.meta = tk.StringVar(value='Качества появятся после проверки')
+        self.status = tk.StringVar(value=self.t('idle'))
+        self.title_text = tk.StringVar(value=self.t('no_video'))
+        self.meta = tk.StringVar(value=self.t('quality_hint'))
         self.logo = tk.PhotoImage(file=str(Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'assets' / 'logo.png'))
         self.iconphoto(True, self.logo)
         self.header_logo = self.logo.subsample(4, 4)
@@ -58,13 +62,13 @@ class DLPapp(tk.Tk):
         header.pack(fill='x')
         tk.Label(header, image=self.header_logo, bg=BG).pack(side='left', padx=(0, 12))
         tk.Label(header, text='DLPapp', bg=BG, fg=FG, font=('Segoe UI', 28, 'bold')).pack(side='left')
-        tk.Label(box, text='Ссылка. Качество. Готово.', bg=BG, fg=MUTED, font=('Segoe UI', 11)).pack(anchor='w', pady=(0, 22))
-        tk.Label(box, text='01  ССЫЛКА НА ВИДЕО', bg=BG, fg=GREEN, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+        self._label(box, 'subtitle', bg=BG, fg=MUTED, font=('Segoe UI', 11)).pack(anchor='w', pady=(0, 22))
+        self._label(box, 'url_label', bg=BG, fg=GREEN, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
         self.entry = tk.Entry(box, textvariable=self.url, bg=CARD, fg=FG, insertbackground=GREEN,
                               relief='flat', font=('Segoe UI', 12))
         self.entry.pack(fill='x', ipady=11, pady=(9, 10))
         self.entry.bind('<Return>', lambda e: self._probe())
-        self.check = self._button(box, 'Проверить видео', self._probe)
+        self.check = self._button(box, 'check', self._probe)
         self.check.pack(fill='x')
         card = tk.Frame(box, bg=CARD, padx=16, pady=14)
         card.pack(fill='x', pady=(20, 18))
@@ -72,32 +76,69 @@ class DLPapp(tk.Tk):
                  wraplength=500, justify='left', anchor='w').pack(fill='x')
         tk.Label(card, textvariable=self.meta, bg=CARD, fg=MUTED, font=('Segoe UI', 10),
                  wraplength=500, justify='left').pack(anchor='w', pady=(6, 0))
-        tk.Label(box, text='02  КАЧЕСТВО', bg=BG, fg=GREEN, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
+        self._label(box, 'quality_label', bg=BG, fg=GREEN, font=('Segoe UI', 10, 'bold')).pack(anchor='w')
         self.combo = ttk.Combobox(box, textvariable=self.quality, state='disabled', font=('Segoe UI', 11))
         self.combo.pack(fill='x', pady=(9, 12))
         row = tk.Frame(box, bg=BG)
         row.pack(fill='x')
-        self.download = self._button(row, 'Скачать видео', self._download)
+        self.download = self._button(row, 'download', self._download)
         self.download.pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.download.config(state='disabled')
-        self.stop = self._button(row, 'Отмена', self._stop, secondary=True)
+        self.stop = self._button(row, 'cancel', self._stop, secondary=True)
         self.stop.pack(side='right')
         self.stop.config(state='disabled')
         self.bar = ttk.Progressbar(box, maximum=100)
         self.bar.pack(fill='x', pady=(19, 8))
         tk.Label(box, textvariable=self.status, bg=BG, fg=MUTED, font=('Segoe UI', 10),
                  wraplength=530, justify='left').pack(anchor='w')
-        tk.Button(box, text='Открыть папку Downloads ↗', command=self._open_folder, bg=BG, fg=GREEN,
+        self.folder_button = tk.Button(box, text=self.t('folder_button'), command=self._open_folder, bg=BG, fg=GREEN,
                   activebackground=BG, activeforeground=FG, relief='flat', cursor='hand2',
-                  font=('Segoe UI', 10)).pack(anchor='w', pady=(12, 0))
+                  font=('Segoe UI', 10))
+        self.folder_button.pack(anchor='w', pady=(12, 0))
+        self.text_widgets.append((self.folder_button, 'folder_button'))
+        self.language_choice = tk.StringVar(value='Русский' if self.language == 'ru' else 'English')
+        selector = ttk.Combobox(header, textvariable=self.language_choice, values=['English', 'Русский'],
+                                state='readonly', width=9, font=('Segoe UI', 10))
+        selector.pack(side='right')
+        selector.bind('<<ComboboxSelected>>', self._change_language)
         self.entry.focus_set()
 
-    @staticmethod
-    def _button(parent, text, command, secondary=False):
-        return tk.Button(parent, text=text, command=command, bg=CARD if secondary else GREEN,
+    def _button(self, parent, key, command, secondary=False):
+        widget = tk.Button(parent, text=self.t(key), command=command, bg=CARD if secondary else GREEN,
                          fg=FG if secondary else BG, activebackground='#6ce8bd', activeforeground=BG,
                          disabledforeground=MUTED, relief='flat', padx=16, pady=10,
                          cursor='hand2', font=('Segoe UI', 11, 'bold'))
+        self.text_widgets.append((widget, key))
+        return widget
+
+    def t(self, key, **values):
+        return translate(self.language, key, **values)
+
+    def _label(self, parent, key, **options):
+        widget = tk.Label(parent, text=self.t(key), **options)
+        self.text_widgets.append((widget, key))
+        return widget
+
+    def set_status(self, key, **values):
+        self._status_key, self._status_values = key, values
+        self.status.set(self.t(key, **values))
+
+    def _error_text(self, error):
+        return error.localized(self.language) if isinstance(error, AppError) else str(error)
+
+    def _change_language(self, _event=None):
+        self.language = 'ru' if self.language_choice.get() == 'Русский' else 'en'
+        self.title(self.t('window'))
+        for widget, key in self.text_widgets:
+            widget.config(text=self.t(key))
+        self.status.set(self.t(self._status_key, **self._status_values))
+        if not self.verified_url:
+            self.title_text.set(self.t('no_video'))
+            self.meta.set(self.t('quality_hint'))
+        try:
+            save_language(self.language)
+        except OSError:
+            messagebox.showerror(self.t('error_title'), self.t('settings_error'))
 
     def _invalidate(self, *_):
         self.verified_url = None
@@ -105,8 +146,8 @@ class DLPapp(tk.Tk):
         self.combo.config(state='disabled', values=[])
         self.quality.set('')
         self.download.config(state='disabled')
-        self.title_text.set('Видео ещё не выбрано')
-        self.meta.set('Качества появятся после проверки')
+        self.title_text.set(self.t('no_video'))
+        self.meta.set(self.t('quality_hint'))
 
     def _set_busy(self, value):
         self.busy = value
@@ -158,24 +199,24 @@ class DLPapp(tk.Tk):
                     if item:
                         self.events.put(('progress', item))
                 elif '[Merger]' in line or '[VideoRemuxer]' in line:
-                    self.events.put(('status', 'Объединяю видео и звук…'))
+                    self.events.put(('status', 'merging'))
             code = proc.wait()
             if self.cancel.is_set():
                 result = ('cancelled', None)
             elif code:
-                raise RuntimeError('\n'.join(tail)[-2500:] or f'yt-dlp завершился с кодом {code}')
+                raise RuntimeError('\n'.join(tail)[-2500:]) if tail else AppError('process_exit', code=code)
             elif kind == 'probe':
                 # Warnings may precede JSON because stderr shares the output pipe.
                 info = next((json.loads(x) for x in reversed(lines) if x.startswith('{')), None)
                 if info is None:
-                    raise ValueError('Сервис не вернул сведения о видео.')
+                    raise AppError('no_metadata')
                 result = ('ready', (url, info, qualities(info)))
             elif final_file and Path(final_file).is_file():
                 result = ('done', final_file)
             else:
-                raise RuntimeError('Загрузка завершилась, но готовый файл не найден.')
+                raise AppError('missing_output')
         except Exception as exc:
-            result = ('cancelled', None) if self.cancel.is_set() else ('error', str(exc))
+            result = ('cancelled', None) if self.cancel.is_set() else ('error', exc)
         finally:
             if proc and proc.poll() is None:
                 self._terminate(proc)
@@ -193,10 +234,10 @@ class DLPapp(tk.Tk):
             url = validate_url(self.url.get())
             command = probe_command(self.root_dir, url)
             self._invalidate()
-            self.status.set('Проверяю доступность видео…')
+            self.set_status('checking')
             self._start(command, 'probe', url)
         except Exception as exc:
-            messagebox.showerror('Не удалось проверить', str(exc))
+            messagebox.showerror(self.t('check_error'), self._error_text(exc))
 
     def _download(self):
         if self.busy or not self.verified_url:
@@ -205,10 +246,10 @@ class DLPapp(tk.Tk):
             self.folder.mkdir(parents=True, exist_ok=True)
             height = self.heights[self.combo.current()]
             command = download_command(self.root_dir, self.verified_url, height, self.folder)
-            self.status.set('Начинаю скачивание…')
+            self.set_status('starting')
             self._start(command, 'download', self.verified_url)
         except Exception as exc:
-            messagebox.showerror('Не удалось скачать', str(exc))
+            messagebox.showerror(self.t('download_error'), self._error_text(exc))
 
     def _poll(self):
         try:
@@ -216,31 +257,31 @@ class DLPapp(tk.Tk):
                 kind, data = self.events.get_nowait()
                 if kind == 'progress':
                     self.bar['value'] = data[0]
-                    self.status.set(f'{data[0]:.1f}% · {data[1]}')
+                    self.set_status('progress', percent=f'{data[0]:.1f}', detail=data[1])
                     continue
                 if kind == 'status':
-                    self.status.set(data)
+                    self.set_status(data)
                     continue
                 self.bar.stop()
                 self.bar.config(mode='determinate')
                 if kind == 'ready':
                     self.verified_url, info, self.heights = data
-                    self.title_text.set(info.get('title') or 'Видео')
+                    self.title_text.set(info.get('title') or self.t('video'))
                     duration = info.get('duration')
                     length = f'{int(duration)//60}:{int(duration)%60:02d}' if duration else '—'
-                    self.meta.set(f"{info.get('uploader') or info.get('extractor') or 'Видео'} · {length}")
+                    self.meta.set(f"{info.get('uploader') or info.get('extractor') or self.t('video')} · {length}")
                     self.combo['values'] = [f'{h}p' for h in self.heights]
                     self.combo.current(0)
-                    self.status.set('Видео доступно. Выберите качество.')
+                    self.set_status('ready')
                 elif kind == 'done':
                     self.bar['value'] = 100
-                    self.status.set('Готово! ' + Path(data).name)
+                    self.set_status('done', name=Path(data).name)
                 elif kind == 'cancelled':
                     self.bar['value'] = 0
-                    self.status.set('Остановлено. Частичные файлы сохранены для повторной загрузки.')
+                    self.set_status('cancelled')
                 elif kind == 'error':
-                    self.status.set('Не удалось завершить операцию. Можно повторить.')
-                    messagebox.showerror('Ошибка', data)
+                    self.set_status('failed')
+                    messagebox.showerror(self.t('error_title'), self._error_text(data))
                 self._set_busy(False)
         except queue.Empty:
             pass
@@ -265,7 +306,7 @@ class DLPapp(tk.Tk):
     def _stop(self):
         self.cancel.set()
         self.stop.config(state='disabled')
-        self.status.set('Останавливаю…')
+        self.set_status('stopping')
         with self.process_lock:
             proc = self.process
         if proc:
@@ -279,11 +320,11 @@ class DLPapp(tk.Tk):
             else:
                 subprocess.Popen(['open' if sys.platform == 'darwin' else 'xdg-open', str(self.folder)])
         except Exception as exc:
-            messagebox.showerror('Папка', str(exc))
+            messagebox.showerror(self.t('folder_title'), self._error_text(exc))
 
     def _close(self):
         if self.busy:
-            if not messagebox.askyesno('Закрыть?', 'Остановить текущую операцию и закрыть приложение?'):
+            if not messagebox.askyesno(self.t('close_title'), self.t('close_question')):
                 return
             self._stop()
             self.after(100, self._close_when_stopped)
