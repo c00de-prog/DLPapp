@@ -3,7 +3,6 @@ import ctypes
 import json
 import locale
 import os
-import tempfile
 from pathlib import Path
 
 STRINGS = {
@@ -97,15 +96,83 @@ def load_language(path=None):
     return detect_language()
 
 
+# Version 2 strings. Keys are identical for both supported languages.
+_NEW = {
+'video_info': ('Video information', 'Информация о видео'),
+'options': ('Format & quality', 'Формат и качество'),
+'format': ('Format', 'Формат'), 'quality': ('Quality', 'Качество'),
+'codec': ('Video codec', 'Видеокодек'),
+'codec_hint': ('Auto chooses an available source codec without video conversion.', 'Автоматический режим выбирает доступный кодек без конвертации видео.'), 'auto': ('Auto', 'Автоматически'),
+'settings': ('Settings', 'Настройки'),
+'close_settings': ('Close', 'Закрыть'), 'downloads': ('Downloads', 'Загрузки'),
+'profile': ('Profile', 'Профиль'), 'general': ('General', 'Основные'),
+'updates': ('Updates', 'Обновления'), 'about': ('About', 'О приложении'),
+'nickname': ('Nickname (stored only on this PC)', 'Никнейм (хранится только на этом ПК)'),
+'language': ('Language', 'Язык'), 'save': ('Save', 'Сохранить'),
+'download_parent': ('Save inside DDownloads in this folder:', 'Сохранять в DDownloads внутри этой папки:'),
+'browse': ('Browse…', 'Обзор…'), 'reset_folder': ('Use folder next to EXE', 'Использовать папку рядом с EXE'),
+'folder_note': ('New downloads use this folder. Existing files are not moved.', 'Новые загрузки сохранятся сюда. Старые файлы не перемещаются.'),
+'folder_now': ('Current folder: {folder}', 'Текущая папка: {folder}'),
+'paste': ('Paste', 'Вставить'), 'copy': ('Copy', 'Копировать'),
+'cut': ('Cut', 'Вырезать'), 'select_all': ('Select all', 'Выделить всё'),
+'clipboard_empty': ('The clipboard has no text.', 'В буфере обмена нет текста.'),
+'auto_updates': ('Check DLPapp updates every 24 hours', 'Проверять обновления DLPapp раз в 24 часа'),
+'auto_ytdlp': ('Update yt-dlp automatically every 24 hours', 'Обновлять yt-dlp автоматически раз в 24 часа'),
+'check_updates': ('Check updates now', 'Проверить обновления'),
+'update_ytdlp': ('Update yt-dlp now', 'Обновить yt-dlp'),
+'current_version': ('Current version: {version}', 'Текущая версия: {version}'),
+'update_checking': ('Checking for updates…', 'Проверяю обновления…'),
+'latest': ('You are using the latest stable version.', 'Установлена последняя стабильная версия.'),
+'new_version': ('DLPapp {version} is available.', 'Доступна DLPapp {version}.'),
+'install_update': ('Download & restart', 'Скачать и перезапустить'),
+'release_page': ('Open release page', 'Открыть страницу релиза'),
+'update_question': ('Download the update and restart DLPapp? Your settings and history will be kept.', 'Скачать обновление и перезапустить DLPapp? Настройки и история сохранятся.'),
+'update_progress': ('Update: {percent}% · {speed:.1f} MiB/s', 'Обновление: {percent}% · {speed:.1f} МиБ/с'),
+'update_installing': ('Update downloaded. Restarting…', 'Обновление скачано. Перезапускаю…'),
+'update_cancelled': ('Update download cancelled.', 'Скачивание обновления отменено.'),
+'update_failed': ('Update failed: {error}', 'Обновление не удалось: {error}'),
+'no_release': ('No published release was found yet.', 'Опубликованный релиз пока не найден.'),
+'rate_limit': ('GitHub request limit reached. Try again later.', 'Достигнут лимит запросов GitHub. Повторите позже.'),
+'invalid_release': ('The release metadata or executable path is invalid.', 'Некорректные данные релиза или путь к EXE.'),
+'missing_digest': ('The release has no SHA256 digest. Open its official page to download manually.', 'У релиза нет SHA256. Откройте официальную страницу для ручной загрузки.'),
+'missing_asset': ('Release asset not found: {name}', 'В релизе нет файла: {name}'),
+'hash_failed': ('Downloaded executable failed integrity verification. The old app was kept.', 'Скачанный EXE не прошёл проверку целостности. Старое приложение сохранено.'),
+'windows_only': ('This feature is available in the Windows EXE.', 'Эта функция доступна в Windows EXE.'),
+'ytdlp_done': ('yt-dlp is ready: {version}', 'yt-dlp готов: {version}'),
+'ytdlp_updating': ('Updating yt-dlp…', 'Обновляю yt-dlp…'),
+'wait_operation': ('Finish or cancel the current operation first.', 'Сначала завершите или отмените текущую операцию.'),
+'about_text': ('DLPapp downloads video and audio using yt-dlp and FFmpeg. Choose a link, format, quality and folder. No Python installation is needed for the Windows EXE.', 'DLPapp скачивает видео и аудио с помощью yt-dlp и FFmpeg. Выберите ссылку, формат, качество и папку. Для Windows EXE установка Python не нужна.'),
+'author': ('Author: {name}', 'Автор: {name}'),
+'background': ('Hide & notify when done', 'Скрыть и уведомить по завершении'),
+'background_hint': ('You can hide this window. DLPapp will notify you when the download finishes.', 'Можно скрыть окно. DLPapp уведомит, когда загрузка завершится.'),
+'hide_question': ('Keep downloading in the background? Yes: hide to tray. No: stop and close. Cancel: stay here.', 'Продолжить загрузку в фоне? Да: скрыть в трей. Нет: остановить и закрыть. Отмена: остаться в окне.'),
+'notification_done': ('Download completed', 'Загрузка завершена'),
+'notification_error': ('Download failed', 'Загрузка не удалась'),
+'open_file': ('Open file', 'Открыть файл'), 'open_folder': ('Open folder', 'Открыть папку'),
+'history_empty': ('No downloads in the selected folder yet.', 'В выбранной папке пока нет загрузок.'),
+'history_title': ('File', 'Файл'), 'history_date': ('Date', 'Дата'),
+'history_format': ('Format', 'Формат'), 'file_missing': ('This file was moved or deleted.', 'Файл перемещён или удалён.'),
+'clear_history': ('Clear history for this folder', 'Очистить историю этой папки'),
+'clear_question': ('Clear this folder’s history? Files will stay on disk.', 'Очистить историю этой папки? Файлы останутся на диске.'),
+'audio_only': ('Audio only · best source', 'Только аудио · лучший источник'),
+'no_compatible': ('No streams match this format and codec. Choose another option.', 'Нет потоков для этого формата и кодека. Выберите другой вариант.'),
+'unsupported_format': ('Unsupported format or codec.', 'Неподдерживаемый формат или кодек.'),
+'codec_note': ('Codecs select source streams without re-encoding. Not every video offers every codec. MP4: H.264/HEVC/AV1; MKV: any; WebM: VP9/AV1. Audio formats are converted by FFmpeg.', 'Кодеки выбирают исходные потоки без перекодирования. Не все кодеки есть у каждого видео. MP4: H.264/HEVC/AV1; MKV: любой; WebM: VP9/AV1. Аудиоформаты конвертирует FFmpeg.'),
+'settings_saved': ('Settings saved.', 'Настройки сохранены.'),
+'processing': ('Processing with FFmpeg…', 'Обработка через FFmpeg…'),
+'privacy': ('Nickname, settings and history stay on this PC. Update checks send no nickname to GitHub.', 'Никнейм, настройки и история хранятся на этом ПК. При проверке обновлений никнейм не отправляется на GitHub.'),
+'update_schedule': ('Checks run at startup when due, then every 24 hours while DLPapp is open. Nothing runs after you quit.', 'Проверки выполняются при запуске, если прошло 24 часа, и затем раз в 24 часа, пока DLPapp открыт. После выхода фоновых проверок нет.'),
+}
+for _key, (_en, _ru) in _NEW.items():
+    STRINGS['en'][_key], STRINGS['ru'][_key] = _en, _ru
+STRINGS['en']['folder_button'] = 'Open DDownloads ↗'
+STRINGS['ru']['folder_button'] = 'Открыть DDownloads ↗'
+STRINGS['en']['settings_error'] = 'Could not save settings. Check write permissions.'
+STRINGS['ru']['settings_error'] = 'Не удалось сохранить настройки. Проверьте права записи.'
+
+# Keep compatibility with callers from v1 while preserving all v2 settings.
 def save_language(language, path=None):
     if language not in STRINGS:
         raise ValueError('Unsupported language')
-    path = path or settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as stream:
-        stream.write(json.dumps({'language': language}))
-        temporary = Path(stream.name)
-    try:
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    from settings import Settings
+    Settings(path).update(language=language)

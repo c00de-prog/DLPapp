@@ -7,6 +7,7 @@ import sys
 import venv
 import zipfile
 import base64
+import hashlib
 from package_exe import package
 from launcher_blob import LAUNCHER_B64
 from pathlib import Path
@@ -55,7 +56,7 @@ def main():
                '--add-data', f'{ROOT / "THIRD_PARTY.md"};.',
                '--add-data', f'{ROOT / "README.md"};.']
     # The user's own license is optional; never generate or replace it.
-    for filename in ('LICENSE', 'LICENSE.txt', 'LICENSE.md'):
+    for filename in ('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'license'):
         if (ROOT / filename).is_file():
             command += ['--add-data', f'{ROOT / filename};.']
     run(command + [ROOT / 'app.py'])
@@ -73,9 +74,12 @@ def main():
     with output.open('rb') as stream:
         if stream.read(2) != b'MZ':
             raise RuntimeError('The output is not a Windows executable.')
+    with output.open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    (distribution / 'DLPapp.exe.sha256').write_text(digest + '  DLPapp.exe\n', encoding='utf-8')
     print('[5/5] Ready:', output, flush=True)
     print('Give users this ONE EXE. Python and tools are included.')
-    print('Runtime is cached once per version. Downloads stay beside the EXE.')
+    print('Runtime is cached once per version. Settings and yt-dlp updates persist across app upgrades.')
 
 
 if __name__ == '__main__':

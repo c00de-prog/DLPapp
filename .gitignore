@@ -24,6 +24,9 @@ dist/
 
 # User downloads and temporary files
 /Downloads/
+/DDownloads/
+/settings.json
+/*.sha256
 *.part
 *.ytdl
 *.tmp

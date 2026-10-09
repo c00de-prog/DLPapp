@@ -3,7 +3,8 @@ import os
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
-from i18n import AppError
+from i18n import AppError, settings_path
+from media import format_options
 
 
 def app_dir():
@@ -31,7 +32,7 @@ def qualities(info):
     for item in info.get('formats', []):
         if item.get('vcodec') not in (None, 'none') and isinstance(item.get('height'), (int, float)):
             heights.add(int(item['height']))
-    if not heights:
+    if not heights and not any(x.get('acodec') not in (None, 'none') for x in info.get('formats', [])):
         raise AppError('no_formats')
     return sorted(heights, reverse=True)
 
@@ -42,10 +43,14 @@ def base_command(root):
     # An optional tools folder next to EXE permits manual upstream updates.
     if (root / 'tools' / ('yt-dlp' + suffix)).is_file():
         tools = root / 'tools'
-    for name in ('yt-dlp', 'ffmpeg', 'ffprobe', 'deno'):
+    for name in ('ffmpeg', 'ffprobe', 'deno'):
         if not (tools / (name + suffix)).is_file():
             raise AppError('missing_tool', name='tools/' + name + suffix)
-    return [str(tools / ('yt-dlp' + suffix)), '--ignore-config', '--no-playlist', '--no-colors',
+    override = settings_path().parent / 'tools' / ('yt-dlp' + suffix)
+    downloader = override if override.is_file() else tools / ('yt-dlp' + suffix)
+    if not downloader.is_file():
+        raise AppError('missing_tool', name='tools/yt-dlp' + suffix)
+    return [str(downloader), '--ignore-config', '--no-playlist', '--no-colors',
             '--encoding', 'utf-8', '--socket-timeout', '20', '--retries', '3', '--extractor-retries', '2',
             '--ffmpeg-location', str(tools), '--js-runtimes', 'deno:' + str(tools / ('deno' + suffix))]
 
@@ -54,16 +59,11 @@ def probe_command(root, url):
     return base_command(root) + ['--dump-single-json', '--skip-download', '--', validate_url(url)]
 
 
-def download_command(root, url, height, folder):
-    height = int(height)
-    if height <= 0:
-        raise AppError('select_quality')
-    # Exact height: never silently substitute a lower quality.
-    selector = f'bv[height={height}]+ba/b[height={height}]/bv[height={height}]'
+def download_command(root, url, height, folder, fmt='MKV', codec='auto'):
     return base_command(root) + ['--newline', '--progress', '--progress-delta', '0.3',
         '--progress-template', 'download:PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
         '--print', 'after_move:FILE:%(filepath)s', '--windows-filenames', '--no-overwrites',
-        '--merge-output-format', 'mkv', '-f', selector, '-P', str(folder),
+        *format_options(height, fmt, codec), '-P', str(folder),
         '-o', '%(title).160B [%(id)s].%(ext)s', '--', validate_url(url)]
 
 

@@ -113,6 +113,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE previous,PWSTR arguments,int sh
   DeleteFileW(zip);DestroyWindow(window);
  }
  ReleaseMutex(mutex);CloseHandle(mutex);fclose(self);if(!success)return 1;
+ SetEnvironmentVariableW(L"DLPAPP_EXE",selfpath);
  SetEnvironmentVariableW(L"DLPAPP_HOME",home);SetEnvironmentVariableW(L"DLPAPP_RUNTIME",cache);
  SetEnvironmentVariableW(L"PYTHONHOME",NULL);SetEnvironmentVariableW(L"PYTHONPATH",NULL);
  wchar_t program[CAP],command[CAP*2];
