@@ -9,6 +9,15 @@ from core import app_dir, validate_url, qualities, download_command, probe_comma
 
 
 class CoreTests(unittest.TestCase):
+    def setUp(self):
+        # Never read tools from the developer's actual AppData during tests.
+        profile = tempfile.TemporaryDirectory(prefix='DLPapp test profile ')
+        self.addCleanup(profile.cleanup)
+        self.test_settings = Path(profile.name) / 'settings.json'
+        settings_patch = patch('core.settings_path', return_value=self.test_settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
+
     def test_url(self):
         self.assertEqual(validate_url(' https://example.com/watch?v=x '), 'https://example.com/watch?v=x')
         for value in ('file:///tmp/video', '-f best', 'example.com', 'https://user:pass@site.test'):
@@ -51,6 +60,25 @@ class CoreTests(unittest.TestCase):
             with patch.object(sys, 'dlpapp_home', str(root / 'moved'), create=True), patch.object(sys, '_MEIPASS', str(bundled), create=True):
                 self.assertEqual(app_dir(), (root / 'moved').resolve())
                 self.assertTrue(probe_command(app_dir(), 'https://example.com/x')[0].startswith(str(bundled)))
+
+    def test_updated_downloader_keeps_bundled_support_tools(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bundled = root / 'temporary-runtime'
+            tools = bundled / 'tools'
+            tools.mkdir(parents=True)
+            suffix = '.exe' if os.name == 'nt' else ''
+            for name in ('yt-dlp', 'ffmpeg', 'ffprobe', 'deno'):
+                (tools / (name + suffix)).touch()
+            override = self.test_settings.parent / 'tools' / ('yt-dlp' + suffix)
+            override.parent.mkdir()
+            override.touch()
+            with patch.object(sys, '_MEIPASS', str(bundled), create=True):
+                command = probe_command(root, 'https://example.com/x')
+            self.assertEqual(command[0], str(override))
+            self.assertEqual(command[command.index('--ffmpeg-location') + 1], str(tools))
+            self.assertEqual(command[command.index('--js-runtimes') + 1], 'deno:' + str(tools / ('deno' + suffix)))
+            self.assertIn('--force-ipv4', command)
 
     def test_missing_tool(self):
         with tempfile.TemporaryDirectory() as temp:
