@@ -21,6 +21,7 @@ from version import VERSION, AUTHOR, GITHUB_URL
 import updates
 from clipboard import bind_entry, paste
 from ui import RoundedButton, Panel, PageStack
+from help_view import HelpPanel
 
 FONT = 'Segoe UI' if os.name == 'nt' else 'DejaVu Sans'
 BG, CARD, FG, MUTED, GREEN = '#0b1219', '#141f29', '#edf4f8', '#94a4b4', '#17c99a'
@@ -144,6 +145,7 @@ class DLPapp(tk.Tk):
         self.nickname_label=tk.Label(branding,text=self.settings.get('nickname') or self.t('subtitle'),bg=BG,fg=MUTED,font=(FONT,10))
         self.nickname_label.pack(anchor='w')
         self._button(header,'settings',self._settings,True).pack(side='right')
+        self._button(header,'help',lambda:self._settings('help'),True).pack(side='right',padx=(8,0))
         self._button(header,'downloads',lambda:self._settings('downloads'),True).pack(side='right',padx=8)
         link=Panel(box);link.pack(fill='x',pady=(0,14));body=link.body
         self._label(body,'url_label',bg=CARD,fg=GREEN,font=(FONT,10,'bold')).pack(anchor='w',pady=(0,12))
@@ -482,7 +484,7 @@ class DLPapp(tk.Tk):
         notebook=self.settings_notebook=PageStack(container,on_select=select)
         notebook.pack(side='right',fill='both',expand=True)
         self.setting_pages={}
-        for key in ('profile','general','downloads','updates','about'):
+        for key in ('profile','general','downloads','updates','help','about'):
             frame=tk.Frame(notebook,bg=BG,padx=12,pady=8)
             notebook.add(frame,text=self.t(key));self.setting_pages[key]=frame
             button=tk.Button(sidebar,text=self.t(key),command=lambda f=frame:notebook.select(f),
@@ -543,6 +545,9 @@ class DLPapp(tk.Tk):
         self.install_button.pack(anchor='w', pady=10)
         self.install_button.config(state='normal' if self.pending_release else 'disabled')
         self._button(page_updates, 'release_page', lambda: webbrowser.open(GITHUB_URL + '/releases/latest'), True).pack(anchor='w')
+        self.help_panel = HelpPanel(self.setting_pages['help'], self.language, self.settings.get('nickname'),
+                                    BG, FG, MUTED, GREEN, FONT)
+        self.help_panel.pack(fill='both', expand=True)
         about = self.setting_pages['about']
         tk.Label(about, text='DLPapp ' + VERSION, bg=BG, fg=FG, font=(FONT, 23, 'bold')).pack(anchor='w')
         self._label(about, 'about_text', fg=MUTED, wraplength=580, justify='left').pack(anchor='w', pady=20)
@@ -595,6 +600,7 @@ class DLPapp(tk.Tk):
             self._options_changed()
         else:
             self._refresh_history()
+            self.help_panel.refresh_nickname(self.settings.get('nickname'))
         if not self.busy and not self.updating and not self.maintenance:
             self.set_status('settings_saved')
 

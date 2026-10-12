@@ -176,3 +176,6 @@ def save_language(language, path=None):
         raise ValueError('Unsupported language')
     from settings import Settings
     Settings(path).update(language=language)
+
+STRINGS['en']['help'] = 'Help'
+STRINGS['ru']['help'] = 'Помощь'

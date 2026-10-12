@@ -50,7 +50,7 @@ def base_command(root):
     downloader = override if override.is_file() else tools / ('yt-dlp' + suffix)
     if not downloader.is_file():
         raise AppError('missing_tool', name='tools/yt-dlp' + suffix)
-    return [str(downloader), '--ignore-config', '--no-playlist', '--no-colors',
+    return [str(downloader), '--force-ipv4', '--ignore-config', '--no-playlist', '--no-colors',
             '--encoding', 'utf-8', '--socket-timeout', '20', '--retries', '3', '--extractor-retries', '2',
             '--ffmpeg-location', str(tools), '--js-runtimes', 'deno:' + str(tools / ('deno' + suffix))]
 

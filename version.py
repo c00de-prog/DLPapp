@@ -1,5 +1,5 @@
 """Release metadata. Update VERSION before publishing a new release."""
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 APP_ID = 'DLPapp'
 AUTHOR = 'c00de-prog'
 REPOSITORY = 'c00de-prog/DLPapp'

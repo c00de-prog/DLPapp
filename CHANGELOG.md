@@ -1,3 +1,9 @@
+# 2.0.2
+
+- Use IPv4 for yt-dlp checks and downloads.
+- Add searchable offline Russian/English Help and nickname greetings.
+- Explain current capabilities and troubleshooting without claiming antivirus safety or guaranteed speed.
+
 # Changelog
 
 ## 2.0.1

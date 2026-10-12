@@ -1,3 +1,12 @@
+## Version 2.0.2
+
+- Force IPv4 for video checks and downloads to avoid the slow connection path observed on a test PC. Timing varies by network and site.
+- Add offline RU/EN Help with nickname greetings, searchable questions and scrollable answers. Open Help in the top bar or Settings.
+- Cover speed, quality, Facebook restrictions, formats, updates, backups, checksums, antivirus reports, downloads and portable startup.
+- Keep the current external yt-dlp process and updater. Persistent network sessions and local file-to-audio conversion are not implemented.
+
+Build on Windows with `build_windows.bat`. This source update does not replace an existing EXE until rebuilt. Test a new build before publishing release v2.0.2.
+
 # DLPapp 2.0.1
 
 A lightweight, portable Windows video and audio downloader built with Python, Tkinter, yt-dlp and FFmpeg.
