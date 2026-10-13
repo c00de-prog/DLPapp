@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dlpapp-cli"
+version = "0.1.0"
+description = "Cross-platform terminal interface for yt-dlp and FFmpeg"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "c00de-prog"}]
+dependencies = ["yt-dlp[default]>=2026.8.19"]
+
+[project.urls]
+Repository = "https://github.com/c00de-prog/DLPapp"
+
+[project.scripts]
+dlpapp = "dlpapp_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
