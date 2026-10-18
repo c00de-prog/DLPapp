@@ -1,3 +1,18 @@
+# 2.0.3
+
+- Reuse checked metadata for downloads via a temporary info JSON; reuse repeated checks for 10 minutes.
+- Refresh expired cached streams once; stop retries on HTTP 429 and pause new GUI requests for 60 seconds.
+- Disable automatic network/extractor/fragment retries and fix PowerShell test execution policy arguments.
+
+- Check Windows notification delivery; restore hidden downloads with a fallback message when display is not confirmed.
+- Add a bilingual Test notification button and notification diagnostics.
+
+- Fix inherited PyInstaller environment during update restarts.
+- Reset the frozen DLL search path before running the installer.
+- Retry GUI startup acknowledgement and add installation/startup diagnostics.
+- Add unique update confirmations, session installer locking, post-copy hashing and nondestructive rollback.
+- Add Windows installer integration tests and manual migration instructions.
+
 # 2.0.2
 
 - Use IPv4 for yt-dlp checks and downloads.

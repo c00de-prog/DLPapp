@@ -9,6 +9,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -167,53 +168,115 @@ def ps_literal(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def install_script(source, target, pid, expected_hash, expected_version=VERSION):
-    """Wait for GUI shutdown, replace exact EXE with rollback, start new EXE.
+def restart_environment(environment=None):
+    """An independent restart must not inherit a frozen application's runtime."""
+    env = dict(os.environ if environment is None else environment)
+    drop = {'_MEIPASS2', 'DLPAPP_EXE', 'DLPAPP_HOME', 'DLPAPP_RUNTIME',
+            'DLPAPP_UPDATE_ACK', 'DLPAPP_UPDATE_TOKEN', 'PYTHONHOME', 'PYTHONPATH',
+            'TCL_LIBRARY', 'TK_LIBRARY'}
+    for key in list(env):
+        if key.upper().startswith('_PYI_') or key.upper() in drop:
+            env.pop(key, None)
+    env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+    return env
 
-    Settings and download directories are never removed. The old cached runtime
-    is intentionally retained, because a different instance may still use it.
+
+def install_script(source, target, pid, expected_hash, expected_version=VERSION, timeout_seconds=300, show_errors=True):
+    """Verified replacement with a per-attempt acknowledgement and safe rollback.
+
+    Never remove the settings, runtime cache, downloads or an existing backup.
+    Never delete a new EXE merely because its GUI has not acknowledged startup.
     """
+    nonce = uuid.uuid4().hex
+    source, target = Path(source), Path(target)
+    ack = source.parent / ('install-' + nonce + '.ready.json')
+    digest = str(expected_hash).lower()
+    if not re.fullmatch('[a-f0-9]{64}', digest):
+        raise ValueError('Expected a SHA256 digest')
+    if not 1 <= int(timeout_seconds) <= 1800:
+        raise ValueError('Invalid startup timeout')
     return f'''$ErrorActionPreference = 'Stop'
 $src = {ps_literal(source)}
 $dst = {ps_literal(target)}
-$bak = $dst + '.dlpapp-backup'
+$bak = $dst + '.dlpapp-backup-{nonce}'
+$failed = $dst + '.dlpapp-failed-{nonce}'
 $log = {ps_literal(settings_path().parent / 'update-error.log')}
-$ack = {ps_literal(Path(source).with_suffix('.ready.json'))}
+$trace = {ps_literal(settings_path().parent / 'update-install.log')}
+$ack = {ps_literal(ack)}
+$token = '{nonce}'
+$expectedHash = '{digest}'
 $changed = $false
+$mutex = New-Object System.Threading.Mutex($false, 'Local\\DLPappUpdateInstaller')
+$locked = $false
+function Trace([string]$message) {{
+  try {{ Add-Content -LiteralPath $trace -Value ((Get-Date -Format o) + ' ' + $message) -Encoding UTF8 }} catch {{}}
+}}
 try {{
-  if ((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -ne {ps_literal(expected_hash)}) {{ throw 'SHA256 mismatch' }}
+  try {{ $locked = $mutex.WaitOne(0) }} catch [System.Threading.AbandonedMutexException] {{ $locked = $true }}
+  if (-not $locked) {{ throw 'Another DLPapp update is running. Wait for it to finish.' }}
+  Trace 'Starting verified installation'
+  if ((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {{ throw 'SHA256 mismatch before install' }}
   $parent = Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue
   if ($parent) {{ Wait-Process -Id {int(pid)} -Timeout 120 }}
-  if (Test-Path -LiteralPath $bak) {{ throw 'Backup already exists. Resolve the previous update first.' }}
-  for ($attempt = 0; $attempt -lt 30; $attempt++) {{
+  Trace 'Old GUI exited; replacing executable'
+  for ($attempt = 0; $attempt -lt 60; $attempt++) {{
     try {{ Move-Item -LiteralPath $dst -Destination $bak; $changed = $true; break }}
-    catch {{ if ($attempt -eq 29) {{ throw }}; Start-Sleep -Milliseconds 500 }}
+    catch {{ if ($attempt -eq 59) {{ throw }}; Start-Sleep -Milliseconds 500 }}
   }}
-  Move-Item -LiteralPath $src -Destination $dst
-  Remove-Item -LiteralPath $ack -ErrorAction SilentlyContinue
+  # Copy keeps the verified download available for recovery.
+  Copy-Item -LiteralPath $src -Destination $dst
+  if ((Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {{ throw 'SHA256 mismatch after install' }}
+  Get-ChildItem Env: | Where-Object {{ $_.Name -like '_PYI_*' }} | ForEach-Object {{ [Environment]::SetEnvironmentVariable($_.Name, $null, 'Process') }}
+  foreach ($name in @('_MEIPASS2','DLPAPP_EXE','DLPAPP_HOME','DLPAPP_RUNTIME','PYTHONHOME','PYTHONPATH','TCL_LIBRARY','TK_LIBRARY')) {{
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+  }}
+  $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
   $env:DLPAPP_UPDATE_ACK = $ack
+  $env:DLPAPP_UPDATE_TOKEN = $token
+  Trace 'Starting independent new launcher'
   $child = Start-Process -FilePath $dst -WorkingDirectory ([IO.Path]::GetDirectoryName($dst)) -PassThru
   $ready = $false
-  for ($i = 0; $i -lt 720; $i++) {{
+  $clock = [Diagnostics.Stopwatch]::StartNew()
+  while ($clock.Elapsed.TotalSeconds -lt {int(timeout_seconds)}) {{
     if (Test-Path -LiteralPath $ack) {{
-      $state = Get-Content -LiteralPath $ack -Raw | ConvertFrom-Json
-      if ($state.app_id -eq 'DLPapp' -and $state.version -eq {ps_literal(expected_version)}) {{ $ready = $true; break }}
+      try {{
+        $state = Get-Content -LiteralPath $ack -Raw -Encoding UTF8 | ConvertFrom-Json
+        $sameExe = [string]::Equals([string]$state.exe, $dst, [StringComparison]::OrdinalIgnoreCase)
+        $gui = Get-Process -Id ([int]$state.pid) -ErrorAction SilentlyContinue
+        if ($state.app_id -eq 'DLPapp' -and $state.version -eq {ps_literal(expected_version)} -and $state.token -eq $token -and $sameExe -and $gui) {{ $ready = $true; break }}
+      }} catch {{ Trace 'Acknowledgement not ready yet' }}
     }}
-    if ($child.HasExited -and $child.ExitCode -ne 0) {{ throw 'New launcher failed' }}
+    $child.Refresh()
+    # The native launcher exits after spawning the runtime; exit 0 alone is not success.
+    if ($child.HasExited -and $child.ExitCode -ne 0) {{ throw 'New launcher failed; check startup errors and Windows Protection History' }}
     Start-Sleep -Milliseconds 250
   }}
-  if (-not $ready) {{ throw 'The new GUI did not confirm startup within 3 minutes' }}
-  Remove-Item -LiteralPath $ack -ErrorAction SilentlyContinue
+  if (-not $ready) {{ throw 'The new GUI did not confirm startup within {int(timeout_seconds)} seconds. See update-startup.log and update-install.log.' }}
+  Trace 'New GUI confirmed; installation succeeded'
   Remove-Item -LiteralPath $bak -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $ack -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
 }} catch {{
-  $_ | Out-String | Set-Content -LiteralPath $log -Encoding UTF8
+  $failure = $_ | Out-String
+  Trace ('FAILED: ' + $failure)
   if ($changed -and (Test-Path -LiteralPath $bak)) {{
-    Remove-Item -LiteralPath $dst -ErrorAction SilentlyContinue
-    Move-Item -LiteralPath $bak -Destination $dst -Force
+    try {{
+      if (Test-Path -LiteralPath $dst) {{ Move-Item -LiteralPath $dst -Destination $failed }}
+      Move-Item -LiteralPath $bak -Destination $dst
+      Trace 'Old EXE restored; failed EXE preserved separately'
+    }} catch {{
+      $failure += "`r`nRollback could not finish (the new EXE may still be running). Close DLPapp before manual recovery. Backup preserved: " + $bak + "`r`n" + ($_ | Out-String)
+      Trace 'Rollback blocked; backup retained'
+    }}
   }}
-  Add-Type -AssemblyName System.Windows.Forms
-  [System.Windows.Forms.MessageBox]::Show('DLPapp update failed. Your settings were preserved. See: ' + $log, 'DLPapp') | Out-Null
+  $failure | Set-Content -LiteralPath $log -Encoding UTF8
+  if (${str(bool(show_errors)).lower()}) {{
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show('DLPapp update failed. Your settings were preserved. See: ' + $log, 'DLPapp') | Out-Null
+  }}
+}} finally {{
+  if ($locked) {{ $mutex.ReleaseMutex() }}
+  $mutex.Dispose()
 }}
 '''
 
@@ -231,6 +294,15 @@ def schedule_install(source, target, digest, expected_version=VERSION):
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(install_script(source, target, os.getpid(), digest, expected_version), encoding='utf-8-sig')
     powershell = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    subprocess.Popen([str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                      '-File', str(script)], creationflags=subprocess.CREATE_NO_WINDOW,
-                     cwd=str(target.parent))
+    # PowerShell is a system program: do not inherit the bundled DLL directory.
+    frozen = getattr(sys, 'frozen', False)
+    if frozen:
+        import ctypes
+        ctypes.windll.kernel32.SetDllDirectoryW(None)
+    try:
+        subprocess.Popen([str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                          '-File', str(script)], creationflags=subprocess.CREATE_NO_WINDOW,
+                         cwd=str(target.parent), env=restart_environment())
+    finally:
+        if frozen:
+            ctypes.windll.kernel32.SetDllDirectoryW(str(sys._MEIPASS))

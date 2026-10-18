@@ -1,3 +1,14 @@
+Notifications: Settings → General → Test notification. If Windows does not confirm display, a hidden window opens with a fallback message. Diagnostics: `%LOCALAPPDATA%\DLPapp\notifications.log`.
+
+## Version 2.0.3 — update restart reliability
+
+- Start the installer/new app with an independent PyInstaller environment and reset the inherited DLL directory before launching PowerShell.
+- Use per-install confirmation tokens and backups; retry GUI acknowledgement writes and retain diagnostic logs.
+- Preserve settings, downloads, runtime and recoverable executables on failure. Verify SHA256 after copying as well as before installation.
+- Add native Windows PowerShell integration tests for success, checksum failure and no-ack rollback.
+- The first migration from an older faulty updater is best installed manually. See FIX_UPDATE_RU.md; backward-compatible acknowledgement alone cannot repair the old installer code.
+- Windows EXE/startup still requires validation on Windows.
+
 ## Version 2.0.2
 
 - Force IPv4 for video checks and downloads to avoid the slow connection path observed on a test PC. Timing varies by network and site.
@@ -140,3 +151,5 @@ Run `python -m unittest discover -s tests -v`. In addition, test the built EXE o
 - Check yt-dlp updates and a **newer test application release**, including cancellation and restart with retained settings.
 
 This package's offline tests and Linux GUI checks do not substitute for native Windows acceptance testing of notifications or EXE replacement. Automatic update checks require a public reachable GitHub release. Download only media you are permitted to save.
+
+Metadata reuse in 2.0.3: repeated checks of the unchanged URL reuse information for 10 minutes. Downloads load fresh checked metadata through a temporary JSON deleted when the worker finishes. Expired metadata uses normal extraction; cached HTTP 403/410 failures get one normal-extraction retry. HTTP 429 stops retries and pauses new GUI requests for at least 60 seconds, without promising that the server limit expires then. No browser cookies are enabled. Interrupted app processes can leave a temporary JSON in the system temp directory. Native Windows and live YouTube checks remain required.

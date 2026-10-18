@@ -179,3 +179,17 @@ def save_language(language, path=None):
 
 STRINGS['en']['help'] = 'Help'
 STRINGS['ru']['help'] = 'Помощь'
+
+STRINGS['en'].update(
+    test_notification='Test notification',
+    notification_test_title='DLPapp notification test',
+    notification_test_text='This is a test notification from DLPapp.',
+    notification_fallback='Windows did not confirm the notification display, so DLPapp has opened this message instead. Check Windows notification settings and Do not disturb.')
+STRINGS['ru'].update(
+    test_notification='Проверить уведомление',
+    notification_test_title='Проверка уведомлений DLPapp',
+    notification_test_text='Это тестовое уведомление DLPapp.',
+    notification_fallback='Windows не подтвердила показ уведомления, поэтому DLPapp открыл это сообщение. Проверьте настройки уведомлений Windows и режим «Не беспокоить».')
+
+STRINGS['en']['rate_limited'] = 'The site limited requests (HTTP 429). Automatic retries stopped. Wait before trying again; DLPapp pauses new requests for at least 60 seconds.'
+STRINGS['ru']['rate_limited'] = 'Сайт ограничил запросы (HTTP 429). Автоматические повторы остановлены. Подождите перед новой попыткой; DLPapp приостанавливает новые запросы минимум на 60 секунд.'

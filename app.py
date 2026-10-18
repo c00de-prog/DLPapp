@@ -6,9 +6,11 @@ import queue
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import tkinter as tk
 import webbrowser
+import uuid
 from collections import deque
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog, font as tkfont
@@ -22,6 +24,7 @@ import updates
 from clipboard import bind_entry, paste
 from ui import RoundedButton, Panel, PageStack
 from help_view import HelpPanel
+from startup_ack import StartupAcknowledgement
 
 FONT = 'Segoe UI' if os.name == 'nt' else 'DejaVu Sans'
 BG, CARD, FG, MUTED, GREEN = '#0b1219', '#141f29', '#edf4f8', '#94a4b4', '#17c99a'
@@ -68,7 +71,8 @@ class DLPapp(tk.Tk):
         self.logo = tk.PhotoImage(file=str(self.resources / 'assets/logo.png'))
         self.iconphoto(True, self.logo)
         self.header_logo = self.logo.subsample(5, 5)
-        self.tray = Tray(self.events, self.resources / 'assets/icon.ico')
+        self.tray = Tray(self.events, self.resources / 'assets/icon.ico', self.settings.path.parent / 'notifications.log')
+        self._notification_pending = {}
         self._build()
         self._invalidate()
         self.set_status('idle')
@@ -243,18 +247,25 @@ class DLPapp(tk.Tk):
         self.stop.config(state='normal' if value else 'disabled')
         self.background_button.config(state='normal' if value and self.kind == 'download' else 'disabled')
 
-    def _start(self, command, kind, url):
+    def _start(self, command, kind, url, metadata=None):
         self.cancel.clear()
         self.kind = kind
         self._set_busy(True)
         self.bar.config(mode='indeterminate' if kind == 'probe' else 'determinate', value=0)
         if kind == 'probe':
             self.bar.start(10)
-        threading.Thread(target=self._worker, args=(command, kind, url), daemon=True).start()
-    def _worker(self, command, kind, url):
+        threading.Thread(target=self._worker, args=(command, kind, url, metadata), daemon=True).start()
+    def _worker(self, command, kind, url, metadata=None):
         proc = None
+        temporary_info = None
+        retry_command = None
         result = None
         try:
+            if metadata is not None:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.info.json', encoding='utf-8', delete=False) as stream:
+                    temporary_info = Path(stream.name)
+                    json.dump(metadata, stream, ensure_ascii=False)
+                command = command[:-2] + ['--load-info-json', str(temporary_info)]
             kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           encoding='utf-8', errors='replace', bufsize=1)
             if os.name == 'nt':
@@ -272,9 +283,14 @@ class DLPapp(tk.Tk):
             if self.cancel.is_set():
                 self._terminate(proc)
             lines, tail, final_file = [], deque(maxlen=12), None
+            rate_limited = False
             for raw in proc.stdout:
                 line = raw.strip()
                 tail.append(line)
+                if "HTTP Error 429" in line or "HTTP Error 429" in line.replace(":", " ") or "Too Many Requests" in line:
+                    rate_limited = True
+                    self._terminate(proc)
+                    break
                 if kind == 'probe':
                     lines.append(line)
                 elif line.startswith('FILE:'):
@@ -288,7 +304,11 @@ class DLPapp(tk.Tk):
             code = proc.wait()
             if self.cancel.is_set():
                 result = ('cancelled', None)
+            elif rate_limited:
+                raise AppError('rate_limited')
             elif code:
+                if temporary_info and any(token in '\n'.join(tail) for token in ('HTTP Error 403', 'HTTP Error 410', 'URL has expired')):
+                    retry_command = command[:-2] + ['--', url]
                 raise RuntimeError('\n'.join(tail)[-2500:]) if tail else AppError('process_exit', code=code)
             elif kind == 'probe':
                 # Warnings may precede JSON because stderr shares the output pipe.
@@ -310,13 +330,23 @@ class DLPapp(tk.Tk):
                 proc.stdout.close()
             with self.process_lock:
                 self.process = None
-            self.events.put(result)
+            if temporary_info:
+                temporary_info.unlink(missing_ok=True)
+            if retry_command and not self.cancel.is_set():
+                DLPapp._worker(self, retry_command, kind, url)
+            else:
+                self.events.put(result)
 
     def _probe(self):
         if self.busy or self.maintenance or self.updating:
             return
         try:
             url = validate_url(self.url.get())
+            if time.monotonic() < getattr(self, '_rate_limit_until', 0):
+                raise AppError('rate_limited')
+            if url == self.verified_url and self.info and time.monotonic() - getattr(self, '_info_time', 0) < 600:
+                self.set_status('ready')
+                return
             command = probe_command(self.root_dir, url)
             self._invalidate()
             self.set_status('checking')
@@ -328,6 +358,8 @@ class DLPapp(tk.Tk):
         if self.busy or self.maintenance or self.updating or not self.verified_url:
             return
         try:
+            if time.monotonic() < getattr(self, '_rate_limit_until', 0):
+                raise AppError('rate_limited')
             fmt, codec = self.format.get(), self.codec.get()
             height = 0 if fmt in AUDIO_FORMATS else int(self.quality.get().rstrip('p'))
             folder = self.settings.folder(self.root_dir)
@@ -337,7 +369,8 @@ class DLPapp(tk.Tk):
             self.download_snapshot = dict(folder=folder, title=self.info.get('title', ''), url=self.verified_url, fmt=fmt)
             self.folder = folder
             self.set_status('background_hint')
-            self._start(command, 'download', self.verified_url)
+            metadata = self.info if time.monotonic() - getattr(self, '_info_time', 0) < 600 else None
+            self._start(command, 'download', self.verified_url, metadata)
         except Exception as exc:
             messagebox.showerror(self.t('download_error'), self._error_text(exc), parent=self)
 
@@ -355,6 +388,16 @@ class DLPapp(tk.Tk):
                     self.bar['value'] = data[0]
                     self.set_status('progress', percent=f'{data[0]:.1f}', detail=data[1])
                     continue
+                if kind == 'notification_shown':
+                    self._notification_pending.pop(data, None)
+                    continue
+                if kind == 'notification_failed':
+                    self._notification_failed(*data)
+                    continue
+                if kind == 'tray_failed':
+                    if self.hidden:
+                        self._restore()
+                    continue
                 if kind == 'status':
                     self.set_status(data)
                     continue
@@ -362,6 +405,7 @@ class DLPapp(tk.Tk):
                 self.bar.config(mode='determinate')
                 if kind == 'ready':
                     self.verified_url, self.info, self.heights = data
+                    self._info_time = time.monotonic()
                     self.title_text.set(self.info.get('title') or self.t('video'))
                     duration = self.info.get('duration')
                     length = f'{int(duration)//60}:{int(duration)%60:02d}' if isinstance(duration, (int, float)) else '—'
@@ -376,19 +420,16 @@ class DLPapp(tk.Tk):
                     except OSError:
                         self.set_status('settings_error')
                     self._refresh_history()
-                    self.tray.notify(self.t('notification_done'), Path(data).name)
-                    if self.hidden and not self.tray.available:
-                        self._restore()
-                        messagebox.showinfo('DLPapp', self.t('done', name=Path(data).name), parent=self)
+                    self._send_notification(self.t('notification_done'), Path(data).name)
                 elif kind == 'cancelled':
                     self.bar['value'] = 0
                     self.set_status('cancelled')
                 elif kind == 'error':
+                    if isinstance(data, AppError) and data.key == 'rate_limited':
+                        self._rate_limit_until = time.monotonic() + 60
                     self.set_status('failed')
                     if self.hidden:
-                        self.tray.notify(self.t('notification_error'), self._error_text(data))
-                        if not self.tray.available:
-                            self._restore()
+                        self._send_notification(self.t('notification_error'), self._error_text(data))
                     if not self.hidden:
                         messagebox.showerror(self.t('error_title'), self._error_text(data), parent=self)
                 self.kind = None
@@ -442,6 +483,29 @@ class DLPapp(tk.Tk):
             self._open_path(self.folder)
         except OSError as exc:
             messagebox.showerror(self.t('folder_title'), str(exc), parent=self)
+
+    def _send_notification(self, title, text, force_fallback=False):
+        tag = uuid.uuid4().hex
+        self._notification_pending[tag] = (title, text, force_fallback, self.hidden)
+        if self.tray.notify(title, text, tag=tag):
+            # Independent safeguard if the native worker stops before it can reply.
+            self.after(10000, lambda: self._notification_failed(tag, 'No delivery confirmation'))
+        else:
+            self.after(0, lambda: self._notification_failed(tag, 'Tray unavailable'))
+        return tag
+
+    def _notification_failed(self, tag, reason):
+        pending = self._notification_pending.pop(tag, None)
+        if pending is None:
+            return
+        title, text, force, was_hidden = pending
+        self.tray.log('Notification fallback: ' + reason)
+        if self.hidden or force or was_hidden:
+            self._restore()
+            messagebox.showinfo(title, text + '\n\n' + self.t('notification_fallback'), parent=self)
+
+    def _test_notification(self):
+        self._send_notification(self.t('notification_test_title'), self.t('notification_test_text'), True)
 
     def _hide(self):
         if self.settings_window and self.settings_window.winfo_exists():self._close_settings()
@@ -509,6 +573,7 @@ class DLPapp(tk.Tk):
         self._button(row, 'browse', self._browse_folder, True).pack(side='right', padx=(8, 0))
         self._button(general, 'reset_folder', lambda: self.parent_choice.set(''), True).pack(anchor='w')
         self._label(general, 'folder_note', fg=MUTED, wraplength=580, justify='left').pack(anchor='w', pady=16)
+        self._button(general, 'test_notification', self._test_notification, True).pack(anchor='w', pady=8)
         downloads = self.setting_pages['downloads']
         self.history_folder = tk.Label(downloads, bg=BG, fg=MUTED, wraplength=580, justify='left', anchor='w')
         self.history_folder.pack(fill='x', pady=(0, 8))
@@ -744,14 +809,9 @@ class DLPapp(tk.Tk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _acknowledge_update(self):
-        value = os.environ.pop('DLPAPP_UPDATE_ACK', None)
-        if value:
-            try:
-                path = Path(value).resolve()
-                if path.parent == (self.settings.path.parent / 'updates').resolve() and path.name.endswith('.ready.json'):
-                    atomic_json(path, dict(app_id='DLPapp', version=VERSION, pid=os.getpid()))
-            except OSError:
-                pass
+        self.startup_ack = StartupAcknowledgement(self.settings.path, VERSION, self.after,
+                                                  updates.executable_path)
+        self.startup_ack.attempt()
 
     def _quit(self):
         self.tray.close()
